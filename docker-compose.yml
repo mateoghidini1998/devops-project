@@ -9,6 +9,10 @@ services:
       - ENVIRONMENT=${ENVIRONMENT}
       - SENTRY_DSN=${SENTRY_DSN}
     working_dir: /app
-    volumes:
-      - .:/app
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
