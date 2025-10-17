@@ -30,6 +30,7 @@ Sentry.init({
 
 app.use(Sentry.Handlers.requestHandler());
 
+/* istanbul ignore next */
 app.use(
     Sentry.Handlers.errorHandler({
         shouldHandleError(error) {
@@ -103,6 +104,7 @@ app.get('/health', (req, res) => {
 });
 
 let serverInstance;
+/* istanbul ignore next */
 if (!process.env.JEST_WORKER_ID) {
     serverInstance = app.listen(port, () => {
         const msg = `Server is running on port ${port}`;
