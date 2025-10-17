@@ -59,7 +59,8 @@ const requestRateLimiter = rateLimit({
 });
 app.use(requestRateLimiter);
 app.use(morgan("dev"));
-app.enable('trust proxy');
+// Trust first proxy (safe default for common reverse-proxy setups)
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 const allowedOrigins = (process.env.CORS_ORIGIN || "").split(',').filter(Boolean);
 if (allowedOrigins.length > 0) {
