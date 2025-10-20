@@ -121,40 +121,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// =============================
-// Sentry structured log helper
-// =============================
-function logToSentry({ level = "info", message, req, res, tags = {}, data = {} }) {
-  Sentry.withScope((scope) => {
-    scope.setLevel(level);
-    // Common tags for filtering
-    scope.setTag("environment", ENVIRONMENT);
-    scope.setTag("service", "api");
-    scope.setTag("method", req?.method || "-");
-    scope.setTag("route", req?.route?.path || req?.originalUrl || "-");
-    Object.entries(tags).forEach(([k, v]) => scope.setTag(k, String(v)));
-
-    // Structured contexts
-    if (req) {
-      scope.setContext("http", {
-        method: req.method,
-        url: req.originalUrl,
-        query: req.query,
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      });
-    }
-    if (res) {
-      scope.setContext("response", {
-        status: res.statusCode,
-      });
-    }
-    if (data && Object.keys(data).length) {
-      scope.setContext("data", data);
-    }
-    Sentry.captureMessage(message || "app.log");
-  });
-}
+// (removed) structured log helper – not used; logging is handled by middleware
 
 // =============================
 // Routes
