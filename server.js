@@ -103,6 +103,30 @@ app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok' });
 });
 
+// Sentry request logging: breadcrumb + optional message (for dashboards)
+const shouldLogRequestsToSentry = (process.env.SENTRY_LOG_REQUESTS || '').toLowerCase() === 'true';
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const durationMs = Date.now() - start;
+        Sentry.addBreadcrumb({
+            category: 'http',
+            message: `${req.method} ${req.originalUrl}`,
+            level: 'info',
+            data: {
+                status: res.statusCode,
+                durationMs,
+                ip: req.ip,
+                userAgent: req.headers['user-agent']
+            },
+        });
+        if (shouldLogRequestsToSentry) {
+            Sentry.captureMessage(`[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`, 'info');
+        }
+    });
+    next();
+});
+
 // In-memory store for tasks
 let nextTaskId = 1;
 const tasks = new Map();
@@ -114,7 +138,6 @@ export const resetTasks = () => {
 
 // Create Task
 app.post('/tasks', (req, res) => {
-    const span = Sentry.startSpan({ name: 'tasks.create' });
     try {
         const { title, description } = req.body || {};
         if (!title || typeof title !== 'string') {
@@ -128,66 +151,44 @@ app.post('/tasks', (req, res) => {
     } catch (error) {
         Sentry.captureException(error);
         res.status(400).json({ error: error.message });
-    } finally {
-        span.end();
     }
 });
 
 // List Tasks
 app.get('/tasks', (req, res) => {
-    const span = Sentry.startSpan({ name: 'tasks.list' });
-    try {
-        res.status(200).json(Array.from(tasks.values()));
-    } finally {
-        span.end();
-    }
+    res.status(200).json(Array.from(tasks.values()));
 });
 
 // Get Task by ID
 app.get('/tasks/:id', (req, res) => {
-    const span = Sentry.startSpan({ name: 'tasks.get' });
-    try {
-        const task = tasks.get(req.params.id);
-        if (!task) return res.status(404).json({ error: 'Task not found' });
-        res.status(200).json(task);
-    } finally {
-        span.end();
-    }
+    const task = tasks.get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    res.status(200).json(task);
 });
 
 // Update Task
 app.put('/tasks/:id', (req, res) => {
-    const span = Sentry.startSpan({ name: 'tasks.update' });
-    try {
-        const task = tasks.get(req.params.id);
-        if (!task) return res.status(404).json({ error: 'Task not found' });
-        const { title, description } = req.body || {};
-        if (title !== undefined && typeof title !== 'string') {
-            return res.status(400).json({ error: 'Field "title" must be a string' });
-        }
-        if (description !== undefined && typeof description !== 'string') {
-            return res.status(400).json({ error: 'Field "description" must be a string' });
-        }
-        const updated = { ...task, ...(title !== undefined ? { title } : {}), ...(description !== undefined ? { description } : {}) };
-        tasks.set(task.id, updated);
-        Sentry.addBreadcrumb({ category: 'tasks', message: 'Task updated', data: { id: task.id } });
-        res.status(200).json(updated);
-    } finally {
-        span.end();
+    const task = tasks.get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    const { title, description } = req.body || {};
+    if (title !== undefined && typeof title !== 'string') {
+        return res.status(400).json({ error: 'Field "title" must be a string' });
     }
+    if (description !== undefined && typeof description !== 'string') {
+        return res.status(400).json({ error: 'Field "description" must be a string' });
+    }
+    const updated = { ...task, ...(title !== undefined ? { title } : {}), ...(description !== undefined ? { description } : {}) };
+    tasks.set(task.id, updated);
+    Sentry.addBreadcrumb({ category: 'tasks', message: 'Task updated', data: { id: task.id } });
+    res.status(200).json(updated);
 });
 
 // Delete Task
 app.delete('/tasks/:id', (req, res) => {
-    const span = Sentry.startSpan({ name: 'tasks.delete' });
-    try {
-        const existed = tasks.delete(req.params.id);
-        if (!existed) return res.status(404).json({ error: 'Task not found' });
-        Sentry.addBreadcrumb({ category: 'tasks', message: 'Task deleted', data: { id: req.params.id } });
-        res.status(204).send();
-    } finally {
-        span.end();
-    }
+    const existed = tasks.delete(req.params.id);
+    if (!existed) return res.status(404).json({ error: 'Task not found' });
+    Sentry.addBreadcrumb({ category: 'tasks', message: 'Task deleted', data: { id: req.params.id } });
+    res.status(204).send();
 });
 
 let serverInstance;
