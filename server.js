@@ -85,9 +85,13 @@ app.use(
     stream: {
       write: (line) => {
         const msg = line.trim();
-        Sentry.addBreadcrumb({ category: "morgan", level: "info", message: msg });
         if (SENTRY_LOG_REQUESTS) {
-          Sentry.captureMessage(`[morgan] ${msg}`, "info");
+          const log = Sentry.logger;
+          if (log && typeof log.info === "function") {
+            log.info(`[morgan] ${msg}`);
+          } else {
+            Sentry.captureMessage(`[morgan] ${msg}`, "info");
+          }
         }
       },
     },
@@ -99,23 +103,18 @@ app.use((req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
     const durationMs = Date.now() - start;
-    Sentry.addBreadcrumb({
-      category: "http",
-      message: `${req.method} ${req.originalUrl}`,
-      level: "info",
-      data: {
-        status: res.statusCode,
-        durationMs,
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      },
-    });
     if (SENTRY_LOG_REQUESTS || res.statusCode >= 400) {
       const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warning" : "info";
-      Sentry.captureMessage(
-        `[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} in ${durationMs}ms`,
-        level
-      );
+      const message = `[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} in ${durationMs}ms`;
+      const log = Sentry.logger;
+      if (log) {
+        if (level === "error" && typeof log.error === "function") log.error(message);
+        else if (level === "warning" && typeof log.warn === "function") log.warn(message);
+        else if (typeof log.info === "function") log.info(message);
+        else Sentry.captureMessage(message, level);
+      } else {
+        Sentry.captureMessage(message, level);
+      }
     }
   });
   next();
@@ -164,21 +163,18 @@ app.post("/tasks", (req, res) => {
     tasks.set(id, task);
 
     // Breadcrumb + structured event
-    Sentry.addBreadcrumb({
-      category: "tasks",
-      message: "Task created",
-      data: { id, title, description },
-    });
+    Sentry.logger.info("Task created", { id, title, description }, new Date().toISOString());
     res.status(201).json(task);
   } catch (error) {
     Sentry.captureException(error);
+    Sentry.logger.error(error.message);
     res.status(400).json({ error: error.message });
   }
 });
 
 // List Tasks
 app.get("/tasks", (_req, res) => {
-  Sentry.addBreadcrumb({ category: "tasks", message: "Tasks listed" });
+  Sentry.logger.info("Tasks listed");
   res.status(200).json(Array.from(tasks.values()));
 });
 
@@ -186,6 +182,7 @@ app.get("/tasks", (_req, res) => {
 app.get("/tasks/:id", (req, res) => {
   const task = tasks.get(req.params.id);
   if (!task) return res.status(404).json({ error: "Task not found" });
+  Sentry.logger.info("Task retrieved", { id: req.params.id, task }, new Date().toISOString());
   res.status(200).json(task);
 });
 
@@ -202,7 +199,7 @@ app.put("/tasks/:id", (req, res) => {
   }
   const updated = { ...task, ...(title !== undefined ? { title } : {}), ...(description !== undefined ? { description } : {}) };
   tasks.set(task.id, updated);
-  Sentry.addBreadcrumb({ category: "tasks", message: "Task updated", data: { id: task.id } });
+  Sentry.logger.info("Task updated", { id: task.id, updated });
   res.status(200).json(updated);
 });
 
@@ -210,7 +207,7 @@ app.put("/tasks/:id", (req, res) => {
 app.delete("/tasks/:id", (req, res) => {
   const existed = tasks.delete(req.params.id);
   if (!existed) return res.status(404).json({ error: "Task not found" });
-  Sentry.addBreadcrumb({ category: "tasks", message: "Task deleted", data: { id: req.params.id } });
+  Sentry.logger.info("Task deleted", { id: req.params.id });
   res.status(204).send();
 });
 
