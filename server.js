@@ -4,9 +4,8 @@ import cors from "cors";
 import compression from "compression";
 import morgan from "morgan";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+import { rateLimit } from "express-rate-limit";
 import * as Sentry from "@sentry/node";
-import { ProfilingIntegration } from "@sentry/profiling-node";
 
 // =============================
 // Bootstrap & Config
@@ -32,22 +31,19 @@ Sentry.init({
   dsn: SENTRY_DSN,
   environment: ENVIRONMENT,
   includeLocalVariables: true,
+  enableLogs: true,
   integrations: [
-    new Sentry.Integrations.Http({ tracing: true }),
-    new Sentry.Integrations.Express({ app }),
-    new ProfilingIntegration(),
-    // Capture console.* as breadcrumbs for extra context
-    new Sentry.Integrations.Console({ levels: ["log", "info", "warn", "error"] }),
+    // send console.log, console.warn, and console.error calls as logs to Sentry
+    Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),
   ],
-  tracesSampleRate: 1.0,
-  profilesSampleRate: 1.0,
+  // turn off tracing/profiling unless explicitly enabled via env
+  tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || "0"),
+  profilesSampleRate: parseFloat(process.env.SENTRY_PROFILES_SAMPLE_RATE || "0"),
 });
 
 // =============================
 // Middleware (order matters)
 // =============================
-app.use(Sentry.Handlers.requestHandler()); // Must be first
-app.use(Sentry.Handlers.tracingHandler());
 
 app.use(compression({ filter: () => true, threshold: 0 }));
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -251,18 +247,8 @@ app.delete("/tasks/:id", (req, res) => {
   res.status(204).send();
 });
 
-// =============================
-// Sentry error handler MUST be after routes
-// =============================
-app.use(
-  Sentry.Handlers.errorHandler({
-    shouldHandleError(error) {
-      // Capture all 4xx/5xx
-      if (+error.status > 399) return true;
-      return false;
-    },
-  })
-);
+// Note: Sentry v9 no longer exposes Handlers.errorHandler in this setup.
+// Errors are captured explicitly where thrown.
 
 // =============================
 // Startup & Shutdown
