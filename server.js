@@ -79,6 +79,16 @@ if (allowedOrigins.length > 0) {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
+// Correlation id for logs
+function generateRequestId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+app.use((req, _res, next) => {
+  // prefer upstream id if provided
+  req.requestId = req.headers["x-request-id"] || generateRequestId();
+  next();
+});
+
 // Morgan → console + Sentry breadcrumb (optionally event)
 app.use(
   morgan("combined", {
@@ -105,12 +115,22 @@ app.use((req, res, next) => {
     const durationMs = Date.now() - start;
     if (SENTRY_LOG_REQUESTS || res.statusCode >= 400) {
       const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warning" : "info";
-      const message = `[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} in ${durationMs}ms`;
+      const message = Sentry.logger.fmt`[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} in ${durationMs}ms`; 
       const log = Sentry.logger;
       if (log) {
-        if (level === "error" && typeof log.error === "function") log.error(message);
-        else if (level === "warning" && typeof log.warn === "function") log.warn(message);
-        else if (typeof log.info === "function") log.info(message);
+        const attributes = {
+          requestId: req.requestId,
+          method: req.method,
+          url: req.originalUrl,
+          status: res.statusCode,
+          durationMs,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+          referer: req.headers["referer"],
+        };
+        if (level === "error" && typeof log.error === "function") log.error(message, attributes);
+        else if (level === "warning" && typeof log.warn === "function") log.warn(message, attributes);
+        else if (typeof log.info === "function") log.info(message, attributes);
         else Sentry.captureMessage(message, level);
       } else {
         Sentry.captureMessage(message, level);
@@ -162,27 +182,50 @@ app.post("/tasks", (req, res) => {
     const task = { id, title, description: description || "" };
     tasks.set(id, task);
 
-    // Breadcrumb + structured event
-    Sentry.logger.info("Task created", { id, title, description }, new Date().toISOString());
+    const { logger } = Sentry;
+    if (logger?.info) {
+      logger.info(
+        logger.fmt`Task created ${id}`,
+        {
+          requestId: req.requestId,
+          titleLength: typeof title === "string" ? title.length : 0,
+          hasDescription: Boolean(description),
+        }
+      );
+    }
     res.status(201).json(task);
   } catch (error) {
     Sentry.captureException(error);
-    Sentry.logger.error(error.message);
+    if (Sentry.logger?.warn) {
+      Sentry.logger.warn("Task create validation failed", {
+        requestId: req.requestId,
+        error: error.message,
+      });
+    }
     res.status(400).json({ error: error.message });
   }
 });
 
 // List Tasks
 app.get("/tasks", (_req, res) => {
-  Sentry.logger.info("Tasks listed");
+  if (Sentry.logger?.info) {
+    Sentry.logger.info("Tasks listed", { requestId: _req.requestId, total: tasks.size });
+  }
   res.status(200).json(Array.from(tasks.values()));
 });
 
 // Get Task by ID
 app.get("/tasks/:id", (req, res) => {
   const task = tasks.get(req.params.id);
-  if (!task) return res.status(404).json({ error: "Task not found" });
-  Sentry.logger.info("Task retrieved", { id: req.params.id, task }, new Date().toISOString());
+  if (!task) {
+    if (Sentry.logger?.warn) {
+      Sentry.logger.warn("Task not found", { requestId: req.requestId, id: req.params.id });
+    }
+    return res.status(404).json({ error: "Task not found" });
+  }
+  if (Sentry.logger?.info) {
+    Sentry.logger.info("Task retrieved", { requestId: req.requestId, id: req.params.id });
+  }
   res.status(200).json(task);
 });
 
@@ -192,22 +235,37 @@ app.put("/tasks/:id", (req, res) => {
   if (!task) return res.status(404).json({ error: "Task not found" });
   const { title, description } = req.body || {};
   if (title !== undefined && typeof title !== "string") {
+    if (Sentry.logger?.warn) {
+      Sentry.logger.warn("Task update validation failed", { requestId: req.requestId, id: req.params.id, field: "title" });
+    }
     return res.status(400).json({ error: 'Field "title" must be a string' });
   }
   if (description !== undefined && typeof description !== "string") {
+    if (Sentry.logger?.warn) {
+      Sentry.logger.warn("Task update validation failed", { requestId: req.requestId, id: req.params.id, field: "description" });
+    }
     return res.status(400).json({ error: 'Field "description" must be a string' });
   }
   const updated = { ...task, ...(title !== undefined ? { title } : {}), ...(description !== undefined ? { description } : {}) };
   tasks.set(task.id, updated);
-  Sentry.logger.info("Task updated", { id: task.id, updated });
+  if (Sentry.logger?.info) {
+    Sentry.logger.info("Task updated", { requestId: req.requestId, id: task.id, changedFields: Object.keys({ ...(title !== undefined && { title: true }), ...(description !== undefined && { description: true }) }) });
+  }
   res.status(200).json(updated);
 });
 
 // Delete Task
 app.delete("/tasks/:id", (req, res) => {
   const existed = tasks.delete(req.params.id);
-  if (!existed) return res.status(404).json({ error: "Task not found" });
-  Sentry.logger.info("Task deleted", { id: req.params.id });
+  if (!existed) {
+    if (Sentry.logger?.warn) {
+      Sentry.logger.warn("Task delete missing", { requestId: req.requestId, id: req.params.id });
+    }
+    return res.status(404).json({ error: "Task not found" });
+  }
+  if (Sentry.logger?.info) {
+    Sentry.logger.info("Task deleted", { requestId: req.requestId, id: req.params.id });
+  }
   res.status(204).send();
 });
 
