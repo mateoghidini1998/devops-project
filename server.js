@@ -140,7 +140,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// (removed) structured log helper – not used; logging is handled by middleware
 
 // =============================
 // Routes
