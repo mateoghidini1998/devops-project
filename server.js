@@ -6,6 +6,7 @@ import morgan from "morgan";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import * as Sentry from "@sentry/node";
+import { ProfilingIntegration } from "@sentry/profiling-node";
 
 // =============================
 // Bootstrap & Config
@@ -35,6 +36,7 @@ Sentry.init({
   integrations: [
     // send console.log, console.warn, and console.error calls as logs to Sentry
     Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),
+    new ProfilingIntegration(),
   ],
   // turn off tracing/profiling unless explicitly enabled via env
   tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || "0"),
@@ -267,9 +269,6 @@ app.delete("/tasks/:id", (req, res) => {
   }
   res.status(204).send();
 });
-
-// Note: Sentry v9 no longer exposes Handlers.errorHandler in this setup.
-// Errors are captured explicitly where thrown.
 
 // =============================
 // Startup & Shutdown
