@@ -268,9 +268,6 @@ app.delete("/tasks/:id", (req, res) => {
   res.status(204).send();
 });
 
-// Note: Sentry v9 no longer exposes Handlers.errorHandler in this setup.
-// Errors are captured explicitly where thrown.
-
 // =============================
 // Startup & Shutdown
 // =============================
