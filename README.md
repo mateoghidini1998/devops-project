@@ -76,7 +76,6 @@ Protección de rama `main` (Branch develop):
 Deploy (opcional):
 - Render con auto-deploy a main; health `GET /health`.
 
-
 ## Notas
 - Usa `ENVIRONMENT=PROD` en producción y ajusta muestreos de Sentry según necesidad.
 
